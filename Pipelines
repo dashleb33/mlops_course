@@ -1,0 +1,70 @@
+# альтернатива построению модели abuses_kaggle_bert и ее использование:
+
+from deeppavlov import build_model
+
+model = build_model('insults_kaggle_bert', download=True)
+
+
+# определяем переменные для компонентов модели и загружаем данные модели:
+
+from deeppavlov.core.commands.utils import expand_path
+from deeppavlov.download import download_resource
+
+
+classifiers_path = expand_path('~/.deeppavlov/models/classifiers')
+model_path = classifiers_path / 'insults_kaggle_torch_bert'
+transformer_name = 'bert-base-uncased'
+
+download_resource(
+    'http://files.deeppavlov.ai/deeppavlov_data/classifiers/insults_kaggle_torch_bert_v5.tar.gz',
+    {classifiers_path}
+    )
+    
+    
+# инициализируем компоненты модели:
+
+from deeppavlov.core.data.simple_vocab import SimpleVocabulary
+from deeppavlov.models.classifiers.proba2labels import Proba2Labels
+from deeppavlov.models.preprocessors.torch_transformers_preprocessor import TorchTransformersPreprocessor
+from deeppavlov.models.torch_bert.torch_transformers_classifier import TorchTransformersClassifierModel
+
+
+preprocessor = TorchTransformersPreprocessor(
+    vocab_file=transformer_name,
+    max_seq_length=64
+    )
+
+classes_vocab = SimpleVocabulary(
+    load_path=model_path/'classes.dict',
+    save_path=model_path/'classes.dict'
+    )
+
+classifier =  TorchTransformersClassifierModel(
+    n_classes=classes_vocab.len,
+    return_probas=True,
+    pretrained_bert=transformer_name,
+    save_path=model_path/'model',
+    optimizer_parameters={'lr': 1e-05}
+    )
+
+proba2labels = Proba2Labels(max_proba=True)
+
+
+# Element является оболочкой для компонента, Element получает компонент и имена входящих и исходящих аргументов
+# Model объединяет Elements в конвейер
+# создаём модель из компонентов:
+
+from deeppavlov import Element, Model
+
+model = Model(
+    x=['x'],
+    out=['y_pred_labels'],
+    pipe=[
+        Element(component=preprocessor, x=['x'], out=['bert_features']),
+        Element(component=classifier, x=['bert_features'], out=['y_pred_probas']),
+        Element(component=proba2labels, x=['y_pred_probas'], out=['y_pred_ids']),
+        Element(component=classes_vocab, x=['y_pred_ids'], out=['y_pred_labels'])
+    ]
+    )
+
+model(['you are stupid', 'you are smart'])
